@@ -1,0 +1,50 @@
+[
+  {
+    "id": "short-stories",
+    "title": "Short Stories",
+    "iconName": "chatbubble-ellipses",
+    "sections": [
+      {
+        "id": "section-1",
+        "title": "Section 1",
+        "description": "2 lessons",
+        "lessons": [
+          {
+            "id": "first-snowfall",
+            "title": "First snowfall",
+            "description": "2 parts",
+            "parts": [
+              {
+                "id": "l1p1",
+                "audioUrl": "https://ssl.gstatic.com/dictionary/static/sounds/20200429/hello--_gb_1.mp3",
+                "transcript": "Today is November 26th."
+              },
+              {
+                "id": "l1p2",
+                "audioUrl": "https://ssl.gstatic.com/dictionary/static/sounds/20200429/hello--_gb_1.mp3",
+                "transcript": "It snowed all day today."
+              }
+            ]
+          },
+          {
+            "id": "jessica-first-day-of-school",
+            "title": "Jessica's first day of school",
+            "description": "2 parts",
+            "parts": [
+              {
+                "id": "l2p1",
+                "audioUrl": "https://ssl.gstatic.com/dictionary/static/sounds/20200429/hello--_gb_1.mp3",
+                "transcript": "Today is Jessica's first day of kindergarten."
+              },
+              {
+                "id": "l2p2",
+                "audioUrl": "https://ssl.gstatic.com/dictionary/static/sounds/20200429/hello--_gb_1.mp3",
+                "transcript": "Jessica and her parents walk to school."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
