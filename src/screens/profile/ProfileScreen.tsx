@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -10,14 +10,42 @@ import { getProgress } from '../../store/progressStore';
 import { UserProgress } from '../../constants/types';
 import Card from '../../components/ui/Card';
 import ProgressBar from '../../components/ui/ProgressBar';
+import {
+  requestNotificationPermission,
+  scheduleDaily,
+  cancelDailyReminder,
+  getNotificationsEnabled,
+} from '../../services/notificationService';
 
 type Nav = StackNavigationProp<RootStackParamList>;
 
 export default function ProfileScreen() {
   const nav = useNavigation<Nav>();
   const [progress, setProgress] = useState<UserProgress | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
 
-  useEffect(() => { getProgress().then(setProgress); }, []);
+  useEffect(() => {
+    getProgress().then(setProgress);
+    getNotificationsEnabled().then(setNotificationsEnabled);
+  }, []);
+
+  const handleNotificationToggle = async () => {
+    if (notificationsEnabled) {
+      await cancelDailyReminder();
+      setNotificationsEnabled(false);
+    } else {
+      const granted = await requestNotificationPermission();
+      if (!granted) {
+        Alert.alert(
+          'Permission required',
+          'Please enable notifications in your device settings to use daily reminders.',
+        );
+        return;
+      }
+      await scheduleDaily(20, 0);
+      setNotificationsEnabled(true);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -45,7 +73,7 @@ export default function ProfileScreen() {
             <Separator />
             <MenuItem icon="bookmark" iconColor={COLORS.secondary} label="Saved Words" onPress={() => nav.navigate('SavedWords')} badge={String(progress?.savedWords.length ?? 0)} />
             <Separator />
-            <MenuItem icon="notifications" iconColor={COLORS.orange} label="Notifications" onPress={() => {}} toggle />
+            <MenuItem icon="notifications" iconColor={COLORS.orange} label="Daily Reminder" onPress={handleNotificationToggle} toggle toggleValue={notificationsEnabled} />
             <Separator />
             <MenuItem icon="settings" iconColor={COLORS.text.secondary} label="Settings" onPress={() => {}} />
           </Card>
@@ -97,8 +125,9 @@ function StatChip({ value, label }: { value: string; label: string }) {
   );
 }
 
-function MenuItem({ icon, iconColor, label, onPress, badge, toggle }: {
-  icon: string; iconColor: string; label: string; onPress: () => void; badge?: string; toggle?: boolean;
+function MenuItem({ icon, iconColor, label, onPress, badge, toggle, toggleValue }: {
+  icon: string; iconColor: string; label: string; onPress: () => void;
+  badge?: string; toggle?: boolean; toggleValue?: boolean;
 }) {
   return (
     <TouchableOpacity style={styles.menuItem} onPress={onPress} activeOpacity={0.7}>
@@ -108,7 +137,9 @@ function MenuItem({ icon, iconColor, label, onPress, badge, toggle }: {
       <Text style={styles.menuLabel}>{label}</Text>
       {badge && <View style={styles.badge}><Text style={styles.badgeText}>{badge}</Text></View>}
       {toggle
-        ? <View style={styles.toggle}><View style={styles.toggleThumb} /></View>
+        ? <View style={[styles.toggle, { backgroundColor: toggleValue ? COLORS.green : COLORS.border }]}>
+            <View style={[styles.toggleThumb, { alignSelf: toggleValue ? 'flex-end' : 'flex-start' }]} />
+          </View>
         : <Ionicons name="chevron-forward" size={16} color={COLORS.text.light} />
       }
     </TouchableOpacity>

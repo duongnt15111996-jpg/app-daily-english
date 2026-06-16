@@ -29,6 +29,7 @@ No test runner is configured. TypeScript is the primary correctness check.
 | Navigation | @react-navigation/native + stack + bottom-tabs | ^7.x |
 | Audio | expo-av | ^16.0.8 |
 | Haptics | expo-haptics | ~15.0.8 |
+| Notifications | expo-notifications | ~0.29.x |
 | Persistence | @react-native-async-storage/async-storage | ^2.2.0 |
 | Animations | react-native-reanimated | ^4.3.1 |
 | Gestures | react-native-gesture-handler | ~2.31.1 |
@@ -69,14 +70,16 @@ Content (topics, sections, lessons) lấy từ **backend API** — không còn h
   - `fetchLessons(topicId, sectionId)` → `ApiLesson[]`
   - `registerDevice()`, `fetchProgress()`, `syncProgress()` — device progress sync
   - `fetchVocabularyWord(word)` → `WordDetails | null` — gọi `GET /api/v1/vocabulary/word/:word`
-  - `WordDetails` interface: `{ word, phonetic, partOfSpeech, definition, example, audioUrl }`
+  - `fetchVocabularyTopics()` → `string[]` — gọi `GET /api/v1/vocabulary/topics`
+  - `fetchRandomVocabularyWords(topic, count)` → `string[]` — gọi `GET /api/v1/vocabulary/random?topic=xxx&count=N`
+  - `WordDetails` interface: `{ word, phonetic, partOfSpeech, definition, example, audioUrl, meanings?: WordMeaning[] }`
+  - `WordMeaning` interface: `{ partOfSpeech: string; definitions: WordDefinition[] }`
+  - `WordDefinition` interface: `{ definition: string; example?: string }`
 - `BASE_URL` mặc định là `https://daily-english-backend-zzmv.onrender.com`. Override bằng `EXPO_PUBLIC_API_URL` trong `.env` nếu cần test với backend local.
 - `fetchTopics()` normalize null fields: `iconName ?? 'book'`, `iconColor ?? ['#3B82F6', '#1560FC']` để tránh crash khi backend trả null.
-- `src/data/topics.ts` — vẫn còn trong codebase, dùng cho `ListeningExerciseScreen` (chưa migrate sang API). Không dùng cho Topics/TopicDetail/LessonDetail nữa.
+- `src/data/topics.ts` — legacy hardcoded data, không còn dùng bởi màn hình nào (ListeningExerciseScreen đã migrate sang API).
 - `src/data/vocabulary.ts` — `VOCABULARY_WORDS[]`. Không còn dùng bởi màn hình nào (SavedWordsScreen đã migrate sang API).
-- `src/services/dictionaryApi.ts` — external vocabulary APIs:
-  - `fetchTopicWords(query, count)` → Datamuse API (`api.datamuse.com/words?ml=...&max=...`)
-  - `fetchWordDetails(word)` → delegate sang `fetchVocabularyWord` trong `api.ts` (không gọi Gemini trực tiếp nữa)
+- `src/services/dictionaryApi.ts` — chỉ còn `fetchWordDetails(word)` delegate sang `fetchVocabularyWord` trong `api.ts`. `fetchTopicWords` (Datamuse API) không còn dùng bởi VocabularyScreen.
 
 **Backend** nằm ở repo riêng: `../backend-daily-english` (Node.js + Express + PostgreSQL). Deploy trên Render tại `https://daily-english-backend-zzmv.onrender.com`.
 
@@ -109,7 +112,7 @@ Progress **không reactive** — các screen dùng `useFocusEffect` để refres
 
 `src/screens/listening/ListeningExerciseScreen.tsx`:
 
-1. Nhận `{ topicId, lessonId }` → lookup `lesson.parts[]` từ hardcoded `topics.ts` (chưa migrate)
+1. Nhận `{ topicId, lessonId }` → fetch `lesson.parts[]` từ API (`fetchListeningParts`)
 2. State machine: `status: 'idle' | 'wrong' | 'correct' | 'completed'`
 3. So sánh đáp án qua `normalizeText()` (lowercase + bỏ dấu câu)
 4. Word-by-word feedback qua `getWordFeedback()` — highlight xanh/đỏ từng từ
@@ -124,9 +127,9 @@ Progress **không reactive** — các screen dùng `useFocusEffect` để refres
 
 State machine: `ScreenView: 'selecting' | 'loading' | 'learning' | 'batch_done'`
 
-1. **selecting** — grid 2 cột, 8 chủ đề hardcode (`VOCAB_TOPICS`) + Random. Số từ lấy từ `dailyGoal.words`.
-2. **loading** — fetch từ Datamuse API (`fetchTopicWords`), hiện spinner.
-3. **learning** — flashcard: mặt trước chỉ có word text. Tap flip → hiển thị definition từ cache (prefetched). Prefetch chạy ngầm: card đầu tiên prefetch ngay sau khi deck load, mỗi lần next card prefetch card tiếp theo — không set loading state. Nếu chưa có cache lúc flip mới fetch và hiện spinner. Nút "Play" dùng `expo-speech` với debounce: disabled + hiện "Playing..." cho đến khi `onDone`/`onStopped`. "Review Again" → xuống cuối deck. "I Know This" → `markWordLearned(word)`, xóa khỏi deck.
+1. **selecting** — grid 2 cột, danh sách topic fetch từ `GET /api/v1/vocabulary/topics` (+ "Random" luôn ở đầu). Icon map qua `TOPIC_ICON_MAP`, fallback `'library'`. Số từ lấy từ `dailyGoal.words`.
+2. **loading** — fetch random words từ `GET /api/v1/vocabulary/random?topic=xxx&count=N` (chỉ trả từ có `meanings` không rỗng), hiện spinner.
+3. **learning** — flashcard: mặt trước chỉ có word text. Tap flip → hiển thị tất cả definitions từ `meanings[]` array (mỗi meaning một partOfSpeech + definitions list có đánh số). Prefetch chạy ngầm: card đầu tiên prefetch ngay sau khi deck load, mỗi lần next card prefetch card tiếp theo — không set loading state. Nếu chưa có cache lúc flip mới fetch và hiện spinner. Prefetch chỉ cache non-null results (tránh block retry). Nút "Play" dùng `expo-speech` với debounce. "Review Again" → xuống cuối deck. "I Know This" → `markWordLearned(word)`, xóa khỏi deck.
 4. **batch_done** — nút "Next Batch" load lại cùng topic, hoặc "Change Topic".
 
 Word text dùng trực tiếp làm ID cho `markWordLearned` / `toggleSavedWord`.
@@ -171,11 +174,11 @@ App mặc định dùng URL Render. Chỉ cần override `.env` khi muốn test 
 - [x] `TopicsScreen` — fetch từ API, loading state
 - [x] `TopicDetailScreen` — header dùng params từ navigation, fetch sections từ API
 - [x] `LessonDetailScreen` — fetch lessons từ API, checkmark từ progressStore
-- [x] `ListeningExerciseScreen` — audio player, check answer, shake/highlight feedback (**core feature**, vẫn dùng hardcoded data)
-- [x] `VocabularyScreen` — topic picker + flashcard, fetch từ Datamuse + dictionaryapi.dev, audio playback
+- [x] `ListeningExerciseScreen` — audio player, check answer, shake/highlight feedback (**core feature**, đã migrate sang API)
+- [x] `VocabularyScreen` — topic picker (từ DB) + flashcard (words từ DB), flip card hiển thị tất cả definitions từ `meanings[]`, audio playback qua expo-speech
 - [x] `SavedWordsScreen` — danh sách + search, fetch chi tiết từ backend (`fetchVocabularyWord`)
 - [x] `StatisticsScreen` — weekly bar chart từ `weeklyActivity`, achievements
-- [x] `ProfileScreen` — profile header, menu
+- [x] `ProfileScreen` — profile header, menu, Daily Reminder toggle (expo-notifications, schedule 8:00 AM hàng ngày, persist AsyncStorage `'notifications_enabled'`)
 - [x] `LearningGoalScreen` — stepper goal
 
 **Shared components**
@@ -187,40 +190,29 @@ App mặc định dùng URL Render. Chỉ cần override `.env` khi muốn test 
 - [x] `GET/POST /api/v1/topics/:topicId/sections`
 - [x] `GET/POST /api/v1/topics/:topicId/sections/:sectionId/lessons`
 - [x] Device progress API: register device, get/put progress (upsert — tự tạo device nếu chưa có)
-- [x] `GET /api/v1/vocabulary/word/:word` — shared dictionary cache: check DB → nếu miss gọi Gemini, lưu vào bảng `vocabulary`, trả về `WordDetails`
+- [x] `GET /api/v1/vocabulary/topics` — trả `DISTINCT topic` từ bảng `vocabulary`
+- [x] `GET /api/v1/vocabulary/random?topic=xxx&count=N` — random words từ bảng `vocabulary`, chỉ từ có `meanings` không rỗng
+- [x] `GET /api/v1/vocabulary/word/:word` — case-insensitive lookup (`LOWER(word)`), trả `WordDetails` với `meanings[]` đầy đủ; Gemini fallback hiện comment out
+- [x] `GET /api/v1/devices/:deviceId/progress` — trả default progress cho device mới (không còn throw 404)
+- [x] `GET /api/v1/topics/:topicId/sections/:sectionId/lessons/:lessonId/parts` — endpoint listening parts cho ListeningExerciseScreen
+
+**Services mới (frontend)**
+- [x] `src/services/notificationService.ts` — `requestNotificationPermission`, `scheduleDaily(hour, minute)`, `cancelDailyReminder`, `getNotificationsEnabled`. Plugin `expo-notifications` đã config trong `app.json`.
 
 ---
 
 ### Cần làm tiếp 🔧
 
-#### P1 — Chưa migrate sang API
-
-| Hạng mục | Mô tả |
-|----------|-------|
-| **ListeningExerciseScreen** | Vẫn dùng `getLessonById()` từ hardcoded `topics.ts`. Cần backend endpoint `GET /lessons/:lessonId/parts` rồi migrate |
-
 #### P2 — Tính năng còn thiếu
 
 | Hạng mục | Mô tả |
 |----------|-------|
-| **Search** | Tìm kiếm topic hoặc từ vựng — chưa có màn hình nào |
-| **Notifications thật** | Toggle "Daily Reminder" chưa làm gì — cần `expo-notifications` |
-| **Empty states** | `TopicsScreen`, `LessonDetailScreen` chưa có empty state khi API trả về rỗng |
-| **Streak lost UI** | Không có thông báo khi streak bị reset |
+| **Streak lost UI** | Không có thông báo khi streak bị reset về 0 |
+| **Empty states** | `LessonDetailScreen` chưa có empty state khi API trả về rỗng |
 
-#### P3 — Nội dung
+#### P3 — Nội dung / UX
 
 | Hạng mục | Mô tả |
 |----------|-------|
-| **Listening parts API** | Backend chưa có endpoint cho `listening_parts` |
-| **Audio URLs** | Các lesson trong `topics.ts` vẫn có `audioUrl: ""` |
-
----
-
-### Thứ tự ưu tiên đề xuất
-
-```
-1. P1: Backend endpoint listening_parts → migrate ListeningExerciseScreen
-2. P2: Empty states cho TopicsScreen và LessonDetailScreen
-3. P2: expo-notifications cho Daily Reminder
-```
+| **Audio URLs** | `audio_url` trong bảng `vocabulary` đều null, đang fallback expo-speech |
+| **Notification time picker** | Daily Reminder hiện cố định 8:00 AM, chưa cho user chọn giờ |
