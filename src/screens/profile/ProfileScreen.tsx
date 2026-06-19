@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 
 import { COLORS, FONTS, HEADER_TOP_EXTRA, RADIUS, SPACING } from '../../constants/theme';
@@ -24,10 +24,12 @@ export default function ProfileScreen() {
   const [progress, setProgress] = useState<UserProgress | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
 
-  useEffect(() => {
-    getProgress().then(setProgress);
-    getNotificationsEnabled().then(setNotificationsEnabled);
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      getProgress().then(setProgress);
+      getNotificationsEnabled().then(setNotificationsEnabled);
+    }, [])
+  );
 
   const handleNotificationToggle = async () => {
     if (notificationsEnabled) {
@@ -52,11 +54,6 @@ export default function ProfileScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Profile header */}
         <View style={styles.profileHeader}>
-          <View style={styles.avatarLg}>
-            <Text style={styles.avatarText}>A</Text>
-          </View>
-          <Text style={styles.name}>Alex Johnson</Text>
-          <Text style={styles.email}>alex@example.com</Text>
           <View style={styles.statsRow}>
             <StatChip value={String(progress?.streak ?? 0)} label="Day Streak" />
             <View style={styles.divider} />
@@ -152,11 +149,7 @@ function Separator() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
-  profileHeader: { backgroundColor: COLORS.primary, paddingTop: SPACING.xl + HEADER_TOP_EXTRA, paddingBottom: SPACING.xl, paddingHorizontal: SPACING.xl, alignItems: 'center' },
-  avatarLg: { width: 72, height: 72, borderRadius: RADIUS.full, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.md },
-  avatarText: { ...FONTS.bold, fontSize: 28, color: COLORS.white },
-  name: { ...FONTS.bold, fontSize: 20, color: COLORS.white },
-  email: { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 4, marginBottom: SPACING.lg },
+  profileHeader: { backgroundColor: COLORS.primary, paddingTop: SPACING.xl + HEADER_TOP_EXTRA, paddingBottom: SPACING.xl + 60, paddingHorizontal: SPACING.xl, alignItems: 'center' },
   statsRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.lg, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: RADIUS.xl, paddingHorizontal: SPACING.xl, paddingVertical: SPACING.md },
   statChip: { alignItems: 'center' },
   chipValue: { ...FONTS.bold, fontSize: 20, color: COLORS.white },
