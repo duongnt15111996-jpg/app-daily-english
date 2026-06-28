@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, TextInput,
-  StyleSheet, SafeAreaView, ActivityIndicator,
+  StyleSheet, SafeAreaView, ActivityIndicator, Modal, ScrollView, Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import * as Speech from 'expo-speech';
 
-import { COLORS, FONTS, HEADER_TOP_EXTRA, RADIUS, SPACING } from '../../constants/theme';
+import { COLORS, FONTS, HEADER_TOP_EXTRA, RADIUS, SPACING, SHADOW } from '../../constants/theme';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { WordDetails, fetchVocabularyWord } from '../../services/api';
 import { getProgress, toggleSavedWord } from '../../store/progressStore';
@@ -20,6 +21,9 @@ export default function SavedWordsScreen() {
   const [words, setWords] = useState<WordDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
+  const [selectedWord, setSelectedWord] = useState<WordDetails | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const speakDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,25 +50,47 @@ export default function SavedWordsScreen() {
     await toggleSavedWord(word);
     setSavedIds(prev => prev.filter(id => id !== word));
     setWords(prev => prev.filter(w => w.word !== word));
+    if (selectedWord?.word === word) setSelectedWord(null);
+  };
+
+  const handleSpeak = (word: string) => {
+    if (speakDebounceRef.current) clearTimeout(speakDebounceRef.current);
+    speakDebounceRef.current = setTimeout(async () => {
+      const speaking = await Speech.isSpeakingAsync();
+      if (speaking) {
+        await Speech.stop();
+        setIsSpeaking(false);
+        return;
+      }
+      setIsSpeaking(true);
+      Speech.speak(word, {
+        language: 'en-US',
+        onDone: () => setIsSpeaking(false),
+        onError: () => setIsSpeaking(false),
+      });
+    }, 100);
+  };
+
+  const handleCloseModal = () => {
+    Speech.stop().catch(() => {});
+    setIsSpeaking(false);
+    setSelectedWord(null);
   };
 
   const renderItem = ({ item }: { item: WordDetails }) => (
-    <View style={styles.card}>
+    <TouchableOpacity style={styles.card} activeOpacity={0.7} onPress={() => setSelectedWord(item)}>
       <View style={styles.badge}>
         <Text style={styles.badgeText}>{item.word.slice(0, 3).toUpperCase()}</Text>
       </View>
       <View style={styles.cardInfo}>
-        <View style={styles.cardTop}>
-          <Text style={styles.word}>{item.word}</Text>
-          {!!item.partOfSpeech && <Text style={styles.pos}>{item.partOfSpeech}</Text>}
-        </View>
-        <Text style={styles.definition} numberOfLines={2}>{item.definition}</Text>
+        <Text style={styles.word}>{item.word}</Text>
         {!!item.phonetic && <Text style={styles.pronunciation}>{item.phonetic}</Text>}
+        <Text style={styles.definition} numberOfLines={2}>{item.definition}</Text>
       </View>
-      <TouchableOpacity onPress={() => handleRemove(item.word)} style={styles.removeBtn}>
+      <TouchableOpacity onPress={() => handleRemove(item.word)} style={styles.removeBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
         <Ionicons name="bookmark" size={20} color={COLORS.primary} />
       </TouchableOpacity>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -110,6 +136,89 @@ export default function SavedWordsScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      {/* Word Detail Modal */}
+      <Modal
+        visible={!!selectedWord}
+        transparent
+        animationType="slide"
+        onRequestClose={handleCloseModal}
+      >
+        <Pressable style={styles.backdrop} onPress={handleCloseModal} />
+        {selectedWord && (
+          <View style={styles.sheet}>
+            {/* Handle */}
+            <View style={styles.handle} />
+
+            {/* Word header */}
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetWordBlock}>
+                <Text style={styles.sheetWord}>{selectedWord.word}</Text>
+                {!!selectedWord.phonetic && (
+                  <Text style={styles.sheetPhonetic}>{selectedWord.phonetic}</Text>
+                )}
+              </View>
+              <TouchableOpacity style={[styles.speakBtn, isSpeaking && styles.speakBtnActive]} onPress={() => handleSpeak(selectedWord.word)}>
+                <Ionicons name={isSpeaking ? 'volume-high' : 'volume-medium-outline'} size={22} color={isSpeaking ? COLORS.white : COLORS.primary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Meanings */}
+            <ScrollView style={styles.sheetBody} showsVerticalScrollIndicator={false}>
+              {selectedWord.meanings && selectedWord.meanings.length > 0 ? (
+                selectedWord.meanings.map((meaning, mi) => (
+                  <View key={mi} style={styles.meaningBlock}>
+                    <View style={styles.posRow}>
+                      <View style={styles.posBadge}>
+                        <Text style={styles.posBadgeText}>{meaning.partOfSpeech}</Text>
+                      </View>
+                    </View>
+                    {meaning.definitions.map((d, di) => (
+                      <View key={di} style={styles.defItem}>
+                        <Text style={styles.defNum}>{di + 1}.</Text>
+                        <View style={styles.defContent}>
+                          <Text style={styles.defText}>{d.definition}</Text>
+                          {!!d.example && (
+                            <Text style={styles.defExample}>"{d.example}"</Text>
+                          )}
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ))
+              ) : (
+                <View style={styles.meaningBlock}>
+                  {!!selectedWord.partOfSpeech && (
+                    <View style={styles.posRow}>
+                      <View style={styles.posBadge}>
+                        <Text style={styles.posBadgeText}>{selectedWord.partOfSpeech}</Text>
+                      </View>
+                    </View>
+                  )}
+                  <View style={styles.defItem}>
+                    <Text style={styles.defNum}>1.</Text>
+                    <View style={styles.defContent}>
+                      <Text style={styles.defText}>{selectedWord.definition}</Text>
+                      {!!selectedWord.example && (
+                        <Text style={styles.defExample}>"{selectedWord.example}"</Text>
+                      )}
+                    </View>
+                  </View>
+                </View>
+              )}
+              <View style={{ height: SPACING.xl }} />
+            </ScrollView>
+
+            {/* Footer */}
+            <View style={styles.sheetFooter}>
+              <TouchableOpacity style={styles.unsaveBtn} onPress={() => handleRemove(selectedWord.word)}>
+                <Ionicons name="bookmark-outline" size={18} color={COLORS.text.secondary} />
+                <Text style={styles.unsaveBtnText}>Bỏ lưu từ này</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -128,14 +237,48 @@ const styles = StyleSheet.create({
   badge: { width: 40, height: 40, borderRadius: RADIUS.md, backgroundColor: COLORS.primaryLight, alignItems: 'center', justifyContent: 'center' },
   badgeText: { fontSize: 10, color: COLORS.primary, ...FONTS.bold },
   cardInfo: { flex: 1 },
-  cardTop: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: 2 },
   word: { ...FONTS.medium, fontSize: 16, color: COLORS.text.primary },
-  pos: { fontSize: 11, color: COLORS.text.secondary, fontStyle: 'italic' },
-  definition: { fontSize: 13, color: COLORS.text.secondary, lineHeight: 18 },
-  pronunciation: { fontSize: 12, color: COLORS.primary, marginTop: 2 },
+  pronunciation: { fontSize: 12, color: COLORS.primary, marginTop: 1 },
+  definition: { fontSize: 13, color: COLORS.text.secondary, lineHeight: 18, marginTop: 2 },
   removeBtn: { padding: SPACING.xs },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: SPACING.md, padding: SPACING.xl },
   emptyTitle: { ...FONTS.medium, fontSize: 18, color: COLORS.text.primary },
   emptySub: { fontSize: 14, color: COLORS.text.secondary, textAlign: 'center', lineHeight: 22 },
+
+  // Modal
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: RADIUS.xxl,
+    borderTopRightRadius: RADIUS.xxl,
+    maxHeight: '80%',
+    ...SHADOW.md,
+  },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: COLORS.border, alignSelf: 'center', marginTop: SPACING.sm, marginBottom: SPACING.md },
+  sheetHeader: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: SPACING.xl, paddingBottom: SPACING.lg, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  sheetWordBlock: { flex: 1, gap: 4 },
+  sheetWord: { ...FONTS.bold, fontSize: 28, color: COLORS.text.primary },
+  sheetPhonetic: { fontSize: 16, color: COLORS.primary, fontStyle: 'italic' },
+  speakBtn: {
+    width: 44, height: 44, borderRadius: RADIUS.full,
+    backgroundColor: COLORS.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+    marginTop: 4,
+  },
+  speakBtnActive: { backgroundColor: COLORS.primary },
+  sheetBody: { paddingHorizontal: SPACING.xl, paddingTop: SPACING.lg },
+  meaningBlock: { marginBottom: SPACING.lg },
+  posRow: { flexDirection: 'row', marginBottom: SPACING.sm },
+  posBadge: { backgroundColor: COLORS.primaryLight, borderRadius: RADIUS.md, paddingHorizontal: SPACING.sm, paddingVertical: 3 },
+  posBadgeText: { fontSize: 12, color: COLORS.primary, ...FONTS.medium, fontStyle: 'italic' },
+  defItem: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.sm },
+  defNum: { fontSize: 14, color: COLORS.text.light, width: 20, marginTop: 1 },
+  defContent: { flex: 1, gap: 4 },
+  defText: { fontSize: 15, color: COLORS.text.primary, lineHeight: 22 },
+  defExample: { fontSize: 13, color: COLORS.text.secondary, fontStyle: 'italic', lineHeight: 20 },
+  sheetFooter: { paddingHorizontal: SPACING.xl, paddingVertical: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.border },
+  unsaveBtn: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, justifyContent: 'center', paddingVertical: SPACING.sm },
+  unsaveBtnText: { fontSize: 14, color: COLORS.text.secondary },
 });

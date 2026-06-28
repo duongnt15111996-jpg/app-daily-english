@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  SafeAreaView, Animated, Keyboard, ScrollView, ActivityIndicator,
+  SafeAreaView, Animated, Keyboard, ScrollView, ActivityIndicator, Modal, Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
@@ -19,6 +19,8 @@ import ProgressBar from '../../components/ui/ProgressBar';
 type Nav = StackNavigationProp<RootStackParamList>;
 type Route = RouteProp<RootStackParamList, 'ListeningExercise'>;
 type Status = 'idle' | 'wrong' | 'correct' | 'completed';
+
+const SPEEDS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5];
 
 function normalizeText(text: string): string {
   return text.toLowerCase().replace(/[^\w\s]/g, '').trim();
@@ -45,6 +47,9 @@ export default function ListeningExerciseScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [wordFeedback, setWordFeedback] = useState<{ word: string; correct: boolean }[]>([]);
   const [completedPartIndices, setCompletedPartIndices] = useState<number[]>([]);
+  const [speed, setSpeed] = useState(1.0);
+  const [showSpeedPicker, setShowSpeedPicker] = useState(false);
+  const speedRef = useRef(1.0);
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const successAnim = useRef(new Animated.Value(0)).current;
   const soundRef = useRef<Audio.Sound | null>(null);
@@ -86,7 +91,7 @@ export default function ListeningExerciseScreen() {
 
       const { sound } = await Audio.Sound.createAsync(
         { uri: currentPart.audioUrl },
-        { shouldPlay: true }
+        { shouldPlay: true, rate: speedRef.current, shouldCorrectPitch: true }
       );
       if (gen !== audioGenRef.current) {
         sound.unloadAsync().catch(() => {});
@@ -161,6 +166,14 @@ export default function ListeningExerciseScreen() {
     }
     setIsPlaying(false);
     setPartIndex(index);
+  };
+
+  const handleSpeedChange = (newSpeed: number) => {
+    speedRef.current = newSpeed;
+    setSpeed(newSpeed);
+    if (soundRef.current) {
+      soundRef.current.setRateAsync(newSpeed, true).catch(() => {});
+    }
   };
 
   if (loadState === 'loading') {
@@ -279,6 +292,28 @@ export default function ListeningExerciseScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Speed picker modal */}
+      <Modal visible={showSpeedPicker} transparent animationType="fade" onRequestClose={() => setShowSpeedPicker(false)}>
+        <Pressable style={styles.speedOverlay} onPress={() => setShowSpeedPicker(false)}>
+          <View style={styles.speedDropdown}>
+            <Text style={styles.speedDropdownTitle}>Tốc độ phát audio</Text>
+            {SPEEDS.map(s => (
+              <TouchableOpacity
+                key={s}
+                style={[styles.speedOption, s === speed && styles.speedOptionActive]}
+                onPress={() => { handleSpeedChange(s); setShowSpeedPicker(false); }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.speedOptionText, s === speed && styles.speedOptionTextActive]}>
+                  {s === 1.0 ? '1× — Bình thường' : `${s}×`}
+                </Text>
+                {s === speed && <Ionicons name="checkmark" size={16} color={COLORS.primary} />}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
+
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {/* Audio Player */}
         <View style={[styles.playerCard, status === 'correct' && styles.playerCorrect, status === 'wrong' && styles.playerWrong]}>
@@ -295,6 +330,15 @@ export default function ListeningExerciseScreen() {
               ))}
             </View>
           )}
+          {/* Speed selector */}
+          <View style={styles.speedWrap}>
+            <Ionicons name="speedometer-outline" size={14} color={COLORS.text.secondary} />
+            <Text style={styles.speedLabel}>Tốc độ audio</Text>
+            <TouchableOpacity style={styles.speedSelect} onPress={() => setShowSpeedPicker(true)} activeOpacity={0.7}>
+              <Text style={styles.speedSelectText}>{speed === 1.0 ? '1×' : `${speed}×`}</Text>
+              <Ionicons name="chevron-down" size={13} color={COLORS.primary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Input area */}
@@ -436,4 +480,23 @@ const styles = StyleSheet.create({
   completedSub: { fontSize: 15, color: COLORS.text.secondary, textAlign: 'center' },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.xl, gap: SPACING.md },
   emptyText: { fontSize: 15, color: COLORS.text.secondary, textAlign: 'center' },
+  speedWrap: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, alignSelf: 'stretch' },
+  speedLabel: { fontSize: 13, color: COLORS.text.secondary, flex: 1 },
+  speedSelect: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: RADIUS.lg, borderWidth: 1,
+    borderColor: COLORS.primary + '60', backgroundColor: COLORS.primaryLight,
+  },
+  speedSelectText: { fontSize: 13, color: COLORS.primary, ...FONTS.medium },
+  speedOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', alignItems: 'center' },
+  speedDropdown: {
+    width: 240, backgroundColor: COLORS.white, borderRadius: RADIUS.xl,
+    paddingVertical: SPACING.sm, ...SHADOW.md,
+  },
+  speedDropdownTitle: { ...FONTS.medium, fontSize: 13, color: COLORS.text.secondary, paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  speedOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: 12 },
+  speedOptionActive: { backgroundColor: COLORS.primaryLight },
+  speedOptionText: { fontSize: 15, color: COLORS.text.primary },
+  speedOptionTextActive: { color: COLORS.primary, ...FONTS.medium },
 });
