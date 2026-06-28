@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserProgress } from '../constants/types';
 import { fetchProgress, registerDevice, syncProgress } from '../services/api';
+import { syncNotification } from '../services/notificationService';
 
 const KEY = 'user_progress';
 
@@ -72,6 +73,11 @@ export async function markLessonCompleted(lessonId: string): Promise<void> {
     progress.weeklyActivity[today] = (progress.weeklyActivity[today] ?? 0) + 1;
   }
   await save(progress);
+  syncNotification(progress).catch(() => {});
+
+  const inProgress: string[] = await getInProgressLessons();
+  const updated = inProgress.filter(id => id !== lessonId);
+  await AsyncStorage.setItem(IN_PROGRESS_KEY, JSON.stringify(updated));
 }
 
 export async function markWordLearned(wordId: string): Promise<void> {
@@ -81,6 +87,7 @@ export async function markWordLearned(wordId: string): Promise<void> {
     progress.todayCompleted.words += 1;
   }
   await save(progress);
+  syncNotification(progress).catch(() => {});
 }
 
 export async function toggleSavedWord(wordId: string): Promise<boolean> {
@@ -101,4 +108,54 @@ export async function updateDailyGoal(lessons: number, words: number): Promise<v
   const progress = await getProgress();
   progress.dailyGoal = { lessons, words };
   await save(progress);
+}
+
+const LAST_LESSON_KEY = 'last_lesson';
+const IN_PROGRESS_KEY = 'in_progress_lessons';
+const LESSON_HISTORY_KEY = 'lesson_history';
+
+export interface LastLesson {
+  topicId: string;
+  sectionId: string;
+  sectionTitle: string;
+}
+
+export interface LessonHistoryEntry {
+  topicId: string;
+  sectionId: string;
+  lessonId: string;
+}
+
+export async function saveLastLesson(data: LastLesson): Promise<void> {
+  await AsyncStorage.setItem(LAST_LESSON_KEY, JSON.stringify(data));
+}
+
+export async function getLastLesson(): Promise<LastLesson | null> {
+  const raw = await AsyncStorage.getItem(LAST_LESSON_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+export async function getInProgressLessons(): Promise<string[]> {
+  const raw = await AsyncStorage.getItem(IN_PROGRESS_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+export async function markLessonInProgress(topicId: string, sectionId: string, lessonId: string): Promise<void> {
+  const progress = await getProgress();
+  if (progress.completedLessons.includes(lessonId)) return;
+
+  const inProgress: string[] = await getInProgressLessons();
+  if (!inProgress.includes(lessonId)) {
+    await AsyncStorage.setItem(IN_PROGRESS_KEY, JSON.stringify([...inProgress, lessonId]));
+  }
+
+  const history: LessonHistoryEntry[] = await getLessonHistory();
+  if (!history.some(e => e.lessonId === lessonId)) {
+    await AsyncStorage.setItem(LESSON_HISTORY_KEY, JSON.stringify([...history, { topicId, sectionId, lessonId }]));
+  }
+}
+
+export async function getLessonHistory(): Promise<LessonHistoryEntry[]> {
+  const raw = await AsyncStorage.getItem(LESSON_HISTORY_KEY);
+  return raw ? JSON.parse(raw) : [];
 }

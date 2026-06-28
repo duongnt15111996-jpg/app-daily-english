@@ -1,61 +1,76 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, SafeAreaView, ActivityIndicator, TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 
 import { COLORS, FONTS, HEADER_TOP_EXTRA, RADIUS, SPACING } from '../../constants/theme';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { ApiTopic, fetchTopics } from '../../services/api';
-import Card from '../../components/ui/Card';
+import { getLessonHistory, LessonHistoryEntry, getProgress } from '../../store/progressStore';
+import PressableCard from '../../components/ui/PressableCard';
 
 type Nav = StackNavigationProp<RootStackParamList>;
+type TopicStatus = 'not_started' | 'in_progress' | 'completed';
+
+function getTopicStatus(topicId: string, history: LessonHistoryEntry[], completedIds: string[]): TopicStatus {
+  const entries = history.filter(e => e.topicId === topicId);
+  if (entries.length === 0) return 'not_started';
+  return entries.every(e => completedIds.includes(e.lessonId)) ? 'completed' : 'in_progress';
+}
 
 export default function TopicsScreen() {
   const nav = useNavigation<Nav>();
   const [topics, setTopics] = useState<ApiTopic[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
+  const [completedIds, setCompletedIds] = useState<string[]>([]);
+  const [lessonHistory, setLessonHistory] = useState<LessonHistoryEntry[]>([]);
 
   useEffect(() => {
     fetchTopics()
-      .then(data => {
-        console.log('[TopicsScreen] topics received:', data.length, JSON.stringify(data));
-        setTopics(data);
-      })
-      .catch(err => console.error('[TopicsScreen] fetchTopics error:', err))
+      .then(setTopics)
+      .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  useFocusEffect(useCallback(() => {
+    getProgress().then(p => setCompletedIds(p.completedLessons));
+    getLessonHistory().then(setLessonHistory);
+  }, []));
 
   const filtered = query.trim()
     ? topics.filter(t => t.title.toLowerCase().includes(query.toLowerCase()))
     : topics;
 
-  const renderItem = ({ item }: { item: ApiTopic }) => (
-    <TouchableOpacity
-      onPress={() => nav.navigate('TopicDetail', {
-        topicId: item.id,
-        topicTitle: item.title,
-        iconColor: item.iconColor,
-        iconName: item.iconName,
-      })}
-      activeOpacity={0.85}
-    >
-      <Card style={styles.card}>
+  const renderItem = ({ item }: { item: ApiTopic }) => {
+    const status = getTopicStatus(item.id, lessonHistory, completedIds);
+    const iconBg = status === 'completed' ? COLORS.green : status === 'in_progress' ? COLORS.orange : (item.iconColor[0] ?? COLORS.primary);
+    return (
+      <PressableCard
+        onPress={() => nav.navigate('TopicDetail', { topicId: item.id, topicTitle: item.title, iconColor: item.iconColor, iconName: item.iconName })}
+        style={{ ...styles.card, ...(status === 'completed' ? styles.cardDone : status === 'in_progress' ? styles.cardInProgress : {}) }}
+      >
         <View style={styles.row}>
-          <View style={[styles.icon, { backgroundColor: item.iconColor[0] ?? COLORS.primary }]}>
-            <Ionicons name={item.iconName as any} size={22} color={COLORS.white} />
+          <View style={[styles.icon, { backgroundColor: iconBg }]}>
+            <Ionicons
+              name={status === 'completed' ? 'checkmark' : item.iconName as any}
+              size={22}
+              color={COLORS.white}
+            />
           </View>
           <View style={styles.info}>
             <Text style={styles.title}>{item.title}</Text>
+            {status === 'in_progress' && <Text style={styles.statusLabel}>Đang học</Text>}
+            {status === 'completed' && <Text style={styles.statusLabelDone}>Hoàn thành</Text>}
           </View>
-          <Ionicons name="chevron-forward" size={16} color={COLORS.text.light} />
+          <Ionicons name="chevron-forward" size={16} color={status === 'completed' ? COLORS.green : status === 'in_progress' ? COLORS.orange : COLORS.text.light} />
         </View>
-      </Card>
-    </TouchableOpacity>
-  );
+      </PressableCard>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -116,10 +131,14 @@ const styles = StyleSheet.create({
   loader: { flex: 1 },
   list: { padding: SPACING.lg, gap: SPACING.md },
   card: { padding: SPACING.lg },
+  cardDone: { borderWidth: 1, borderColor: COLORS.green + '50', backgroundColor: '#F0FFF4' },
+  cardInProgress: { borderWidth: 1, borderColor: COLORS.orange + '60', backgroundColor: '#FFFBEB' },
   row: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
   icon: { width: 48, height: 48, borderRadius: RADIUS.lg, alignItems: 'center', justifyContent: 'center' },
   info: { flex: 1 },
   title: { ...FONTS.medium, fontSize: 16, color: COLORS.text.primary },
+  statusLabel: { fontSize: 12, color: COLORS.orange, marginTop: 2 },
+  statusLabelDone: { fontSize: 12, color: COLORS.green, marginTop: 2 },
   empty: { alignItems: 'center', paddingTop: SPACING.xl * 2, gap: SPACING.md },
   emptyText: { fontSize: 14, color: COLORS.text.secondary, textAlign: 'center' },
 });

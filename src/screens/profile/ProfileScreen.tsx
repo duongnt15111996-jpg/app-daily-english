@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, SafeAreaView, Alert, Modal, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 
 import { COLORS, FONTS, HEADER_TOP_EXTRA, RADIUS, SPACING } from '../../constants/theme';
@@ -15,6 +15,9 @@ import {
   scheduleDaily,
   cancelDailyReminder,
   getNotificationsEnabled,
+  getNotificationTime,
+  saveNotificationTime,
+  syncNotification,
 } from '../../services/notificationService';
 
 type Nav = StackNavigationProp<RootStackParamList>;
@@ -23,11 +26,18 @@ export default function ProfileScreen() {
   const nav = useNavigation<Nav>();
   const [progress, setProgress] = useState<UserProgress | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notifTime, setNotifTime] = useState<{ hour: number; minute: number }>({ hour: 20, minute: 0 });
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [pickerHour, setPickerHour] = useState(20);
+  const [pickerMinute, setPickerMinute] = useState(0);
 
-  useEffect(() => {
-    getProgress().then(setProgress);
-    getNotificationsEnabled().then(setNotificationsEnabled);
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      getProgress().then(setProgress);
+      getNotificationsEnabled().then(setNotificationsEnabled);
+      getNotificationTime().then(setNotifTime);
+    }, [])
+  );
 
   const handleNotificationToggle = async () => {
     if (notificationsEnabled) {
@@ -42,21 +52,51 @@ export default function ProfileScreen() {
         );
         return;
       }
-      await scheduleDaily(20, 0);
-      setNotificationsEnabled(true);
+      setPickerHour(notifTime.hour);
+      setPickerMinute(notifTime.minute);
+      setShowTimePicker(true);
     }
   };
+
+  const handleTimeConfirm = async () => {
+    setShowTimePicker(false);
+    await scheduleDaily(pickerHour, pickerMinute);
+    const newTime = { hour: pickerHour, minute: pickerMinute };
+    setNotifTime(newTime);
+    setNotificationsEnabled(true);
+    if (progress) await syncNotification(progress);
+    Alert.alert(
+      'Để nhận thông báo đúng giờ',
+      'Trên một số điện thoại Android (Xiaomi, OPPO, Samsung...), bạn cần vào Cài đặt → Ứng dụng → Daily English và:\n\n• Bật Khởi động tự động\n• Chọn Pin → Không giới hạn',
+      [
+        { text: 'Để sau', style: 'cancel' },
+        { text: 'Mở cài đặt', onPress: () => Linking.openSettings() },
+      ],
+    );
+  };
+
+  const handleChangeTime = () => {
+    setPickerHour(notifTime.hour);
+    setPickerMinute(notifTime.minute);
+    setShowTimePicker(true);
+  };
+
+  const handleTimePickerConfirm = async () => {
+    setShowTimePicker(false);
+    await saveNotificationTime(pickerHour, pickerMinute);
+    const newTime = { hour: pickerHour, minute: pickerMinute };
+    setNotifTime(newTime);
+    if (progress) await syncNotification(progress);
+  };
+
+  const formatTime = (h: number, m: number) =>
+    `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Profile header */}
         <View style={styles.profileHeader}>
-          <View style={styles.avatarLg}>
-            <Text style={styles.avatarText}>A</Text>
-          </View>
-          <Text style={styles.name}>Alex Johnson</Text>
-          <Text style={styles.email}>alex@example.com</Text>
           <View style={styles.statsRow}>
             <StatChip value={String(progress?.streak ?? 0)} label="Day Streak" />
             <View style={styles.divider} />
@@ -74,11 +114,22 @@ export default function ProfileScreen() {
             <MenuItem icon="bookmark" iconColor={COLORS.secondary} label="Saved Words" onPress={() => nav.navigate('SavedWords')} badge={String(progress?.savedWords.length ?? 0)} />
             <Separator />
             <MenuItem icon="notifications" iconColor={COLORS.orange} label="Daily Reminder" onPress={handleNotificationToggle} toggle toggleValue={notificationsEnabled} />
-            <Separator />
-            <MenuItem icon="settings" iconColor={COLORS.text.secondary} label="Settings" onPress={() => {}} />
+            {notificationsEnabled && (
+              <>
+                <Separator />
+                <TouchableOpacity style={styles.timeRow} onPress={handleChangeTime} activeOpacity={0.7}>
+                  <View style={[styles.menuIcon, { backgroundColor: COLORS.orange + '20' }]}>
+                    <Ionicons name="time-outline" size={18} color={COLORS.orange} />
+                  </View>
+                  <Text style={styles.menuLabel}>Reminder time</Text>
+                  <Text style={styles.timeValue}>{formatTime(notifTime.hour, notifTime.minute)}</Text>
+                  <Ionicons name="chevron-forward" size={16} color={COLORS.text.light} />
+                </TouchableOpacity>
+              </>
+            )}
           </Card>
 
-          {/* Learning Level */}
+          {/* Learning Level — TODO: implement when backend supports level filtering
           <Card style={styles.levelCard}>
             <Text style={styles.sectionTitle}>Learning Level</Text>
             <View style={styles.levelRow}>
@@ -88,6 +139,7 @@ export default function ProfileScreen() {
             </View>
             <ProgressBar progress={0.45} height={8} style={{ marginTop: SPACING.xs }} />
           </Card>
+          */}
 
           {/* Study Statistics */}
           <Card style={styles.studyCard}>
@@ -106,13 +158,68 @@ export default function ProfileScreen() {
               <Text style={styles.studyLabel}>Average Accuracy</Text>
               <Text style={[styles.studyValue, { color: COLORS.green }]}>84%</Text>
             </View>
-            <TouchableOpacity style={styles.logoutBtn} onPress={() => {}}>
-              <Text style={styles.logoutText}>Log Out</Text>
-            </TouchableOpacity>
           </Card>
         </View>
       </ScrollView>
+
+      {/* Time Picker Modal */}
+      <Modal visible={showTimePicker} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Set reminder time</Text>
+            <View style={styles.pickerRow}>
+              <TimeColumn
+                value={pickerHour}
+                min={0}
+                max={23}
+                onChange={setPickerHour}
+                label="Hour"
+              />
+              <Text style={styles.pickerColon}>:</Text>
+              <TimeColumn
+                value={pickerMinute}
+                min={0}
+                max={55}
+                step={5}
+                onChange={setPickerMinute}
+                label="Min"
+              />
+            </View>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => setShowTimePicker(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirm}
+                onPress={notificationsEnabled ? handleTimePickerConfirm : handleTimeConfirm}
+              >
+                <Text style={styles.modalConfirmText}>Confirm</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+function TimeColumn({ value, min, max, step = 1, onChange, label }: {
+  value: number; min: number; max: number; step?: number;
+  onChange: (v: number) => void; label: string;
+}) {
+  const increment = () => onChange(value + step > max ? min : value + step);
+  const decrement = () => onChange(value - step < min ? max - ((max - min) % step || step) : value - step);
+  return (
+    <View style={styles.timeCol}>
+      <Text style={styles.timeColLabel}>{label}</Text>
+      <TouchableOpacity onPress={increment} style={styles.timeBtn}>
+        <Ionicons name="chevron-up" size={22} color={COLORS.primary} />
+      </TouchableOpacity>
+      <Text style={styles.timeColValue}>{String(value).padStart(2, '0')}</Text>
+      <TouchableOpacity onPress={decrement} style={styles.timeBtn}>
+        <Ionicons name="chevron-down" size={22} color={COLORS.primary} />
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -152,15 +259,11 @@ function Separator() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
-  profileHeader: { backgroundColor: COLORS.primary, paddingTop: SPACING.xl + HEADER_TOP_EXTRA, paddingBottom: SPACING.xl, paddingHorizontal: SPACING.xl, alignItems: 'center' },
-  avatarLg: { width: 72, height: 72, borderRadius: RADIUS.full, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.md },
-  avatarText: { ...FONTS.bold, fontSize: 28, color: COLORS.white },
-  name: { ...FONTS.bold, fontSize: 20, color: COLORS.white },
-  email: { fontSize: 13, color: 'rgba(255,255,255,0.75)', marginTop: 4, marginBottom: SPACING.lg },
+  profileHeader: { backgroundColor: COLORS.primary, paddingTop: SPACING.xl + 60, paddingBottom: SPACING.xl + 60, paddingHorizontal: SPACING.xl, alignItems: 'center' },
   statsRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.lg, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: RADIUS.xl, paddingHorizontal: SPACING.xl, paddingVertical: SPACING.md },
   statChip: { alignItems: 'center' },
-  chipValue: { ...FONTS.bold, fontSize: 20, color: COLORS.white },
-  chipLabel: { fontSize: 11, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
+  chipValue: { ...FONTS.bold, fontSize: 26, color: COLORS.white },
+  chipLabel: { fontSize: 14, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
   divider: { width: 1, height: 30, backgroundColor: 'rgba(255,255,255,0.3)' },
   body: { padding: SPACING.lg, gap: SPACING.md },
   menuCard: { padding: 0, overflow: 'hidden' },
@@ -172,6 +275,8 @@ const styles = StyleSheet.create({
   toggle: { width: 44, height: 24, backgroundColor: COLORS.green, borderRadius: RADIUS.full, justifyContent: 'center', paddingHorizontal: 2 },
   toggleThumb: { width: 20, height: 20, borderRadius: RADIUS.full, backgroundColor: COLORS.white, alignSelf: 'flex-end' },
   separator: { height: 1, backgroundColor: COLORS.border, marginLeft: SPACING.lg + 36 + SPACING.md },
+  timeRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md, padding: SPACING.lg },
+  timeValue: { fontSize: 15, color: COLORS.primary, ...FONTS.medium, marginRight: SPACING.xs },
   sectionTitle: { ...FONTS.medium, fontSize: 16, color: COLORS.text.primary, marginBottom: SPACING.md },
   levelCard: { padding: SPACING.xl },
   levelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.xs },
@@ -181,6 +286,19 @@ const styles = StyleSheet.create({
   studyRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: SPACING.sm, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   studyLabel: { fontSize: 14, color: COLORS.text.secondary },
   studyValue: { ...FONTS.medium, fontSize: 14, color: COLORS.text.primary },
-  logoutBtn: { marginTop: SPACING.lg, alignItems: 'center' },
-  logoutText: { fontSize: 14, color: COLORS.red },
+  // Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center' },
+  modalBox: { backgroundColor: COLORS.white, borderRadius: RADIUS.xl, padding: SPACING.xl, width: 280 },
+  modalTitle: { ...FONTS.medium, fontSize: 17, color: COLORS.text.primary, textAlign: 'center', marginBottom: SPACING.xl },
+  pickerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.xl, marginBottom: SPACING.xl },
+  pickerColon: { ...FONTS.bold, fontSize: 32, color: COLORS.text.primary, marginTop: 20 },
+  timeCol: { alignItems: 'center', gap: SPACING.sm },
+  timeColLabel: { fontSize: 12, color: COLORS.text.light },
+  timeBtn: { padding: SPACING.xs },
+  timeColValue: { ...FONTS.bold, fontSize: 36, color: COLORS.text.primary, minWidth: 52, textAlign: 'center' },
+  modalActions: { flexDirection: 'row', gap: SPACING.md },
+  modalCancel: { flex: 1, padding: SPACING.md, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.border, alignItems: 'center' },
+  modalCancelText: { fontSize: 15, color: COLORS.text.secondary },
+  modalConfirm: { flex: 1, padding: SPACING.md, borderRadius: RADIUS.lg, backgroundColor: COLORS.primary, alignItems: 'center' },
+  modalConfirmText: { fontSize: 15, color: COLORS.white, ...FONTS.medium },
 });

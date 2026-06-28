@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, SafeAreaView, Switch, Alert,
+  View, Text, TouchableOpacity, StyleSheet, SafeAreaView, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -13,8 +13,6 @@ export default function LearningGoalScreen() {
   const nav = useNavigation();
   const [lessons, setLessons] = useState(2);
   const [words, setWords] = useState(10);
-  const [reminder, setReminder] = useState(true);
-
   useEffect(() => {
     getProgress().then(p => { setLessons(p.dailyGoal.lessons); setWords(p.dailyGoal.words); });
   }, []);
@@ -37,7 +35,7 @@ export default function LearningGoalScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => nav.goBack()}>
+        <TouchableOpacity onPress={() => nav.goBack()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Ionicons name="arrow-back" size={20} color={COLORS.text.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Learning Goal</Text>
@@ -73,22 +71,6 @@ export default function LearningGoalScreen() {
           <Step value={words} onDec={() => setWords(v => Math.max(5, v - 5))} onInc={() => setWords(v => Math.min(50, v + 5))} unit="words / day" />
         </Card>
 
-        <Card style={{ ...styles.goalCard, ...styles.reminderCard }}>
-          <View style={[styles.goalIcon, { backgroundColor: '#FFF8E8' }]}>
-            <Ionicons name="alarm" size={22} color="#F59E0B" />
-          </View>
-          <View style={styles.goalInfo}>
-            <Text style={styles.goalLabel}>Daily Reminder</Text>
-            <Text style={styles.goalDesc}>Get notified to study every day</Text>
-          </View>
-          <Switch
-            value={reminder}
-            onValueChange={setReminder}
-            trackColor={{ true: COLORS.primary, false: COLORS.border }}
-            thumbColor={COLORS.white}
-          />
-        </Card>
-
         <Button label="Save Changes" onPress={handleSave} fullWidth style={{ marginTop: SPACING.md }} />
       </View>
     </SafeAreaView>
@@ -111,5 +93,4 @@ const styles = StyleSheet.create({
   stepBtn: { width: 36, height: 36, borderRadius: RADIUS.full, backgroundColor: COLORS.primaryLight, alignItems: 'center', justifyContent: 'center' },
   stepValue: { ...FONTS.bold, fontSize: 26, color: COLORS.primary, minWidth: 40, textAlign: 'center' },
   stepUnit: { fontSize: 13, color: COLORS.text.secondary, flex: 1 },
-  reminderCard: { flexDirection: 'row', alignItems: 'center' },
 });

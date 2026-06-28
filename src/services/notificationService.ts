@@ -1,8 +1,10 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { UserProgress } from '../constants/types';
 
 const STORAGE_KEY = 'notifications_enabled';
+const STORAGE_TIME_KEY = 'notification_time';
 const CHANNEL_ID = 'daily-reminder';
 
 Notifications.setNotificationHandler({
@@ -31,21 +33,68 @@ export async function requestNotificationPermission(): Promise<boolean> {
   return status === 'granted';
 }
 
-export async function scheduleDaily(hour = 8, minute = 0): Promise<void> {
+export async function saveNotificationTime(hour: number, minute: number): Promise<void> {
+  await AsyncStorage.setItem(STORAGE_TIME_KEY, JSON.stringify({ hour, minute }));
+}
+
+export async function getNotificationTime(): Promise<{ hour: number; minute: number }> {
+  const raw = await AsyncStorage.getItem(STORAGE_TIME_KEY);
+  if (!raw) return { hour: 20, minute: 0 };
+  return JSON.parse(raw);
+}
+
+export async function syncNotification(progress: UserProgress): Promise<void> {
+  const enabled = await getNotificationsEnabled();
+  if (!enabled) return;
+
+  const { hour, minute } = await getNotificationTime();
+
+  const remainingLessons = Math.max(0, progress.dailyGoal.lessons - progress.todayCompleted.lessons);
+  const remainingWords = Math.max(0, progress.dailyGoal.words - progress.todayCompleted.words);
+  const goalMet = remainingLessons === 0 && remainingWords === 0;
+  const hasStarted = progress.todayCompleted.lessons > 0 || progress.todayCompleted.words > 0;
+
+  let body: string;
+  if (goalMet) {
+    body = 'Bắt đầu ngày mới với một bài học tiếng Anh!';
+  } else if (hasStarted) {
+    const parts: string[] = [];
+    if (remainingLessons > 0) parts.push(`${remainingLessons} lesson`);
+    if (remainingWords > 0) parts.push(`${remainingWords} từ`);
+    body = `Còn ${parts.join(' và ')} để hoàn thành mục tiêu hôm nay!`;
+  } else {
+    body = 'Bạn chưa học hôm nay, hãy dành 10 phút luyện tập!';
+  }
+
+  const content = {
+    title: 'Daily English',
+    body,
+    ...(Platform.OS === 'android' && { channelId: CHANNEL_ID }),
+  };
+
+  const now = new Date();
+  const notifToday = new Date();
+  notifToday.setHours(hour, minute, 0, 0);
+
+  // Fire today nếu goal chưa đạt và chưa tới giờ, ngược lại fire ngày mai
+  const triggerDate = new Date(notifToday);
+  if (goalMet || now >= notifToday) {
+    triggerDate.setDate(triggerDate.getDate() + 1);
+  }
+
   await ensureAndroidChannel();
   await Notifications.cancelAllScheduledNotificationsAsync();
   await Notifications.scheduleNotificationAsync({
-    content: {
-      title: 'Time to learn!',
-      body: 'Practice your English for a few minutes today.',
-      ...(Platform.OS === 'android' && { channelId: CHANNEL_ID }),
-    },
+    content,
     trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour,
-      minute,
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: triggerDate,
     },
   });
+}
+
+export async function scheduleDaily(hour: number, minute: number): Promise<void> {
+  await saveNotificationTime(hour, minute);
   await AsyncStorage.setItem(STORAGE_KEY, 'true');
 }
 

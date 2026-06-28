@@ -430,7 +430,7 @@ const styles = StyleSheet.create({
     paddingTop: SPACING.xl + HEADER_TOP_EXTRA,
     paddingBottom: SPACING.md,
   },
-  backBtn: { padding: 4 },
+  backBtn: { padding: 12 },
   headerTitle: { ...FONTS.bold, fontSize: 20, color: COLORS.text.primary, flex: 1, marginHorizontal: SPACING.sm },
 
   // Selector

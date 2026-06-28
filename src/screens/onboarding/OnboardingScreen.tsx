@@ -238,7 +238,7 @@ const styles = StyleSheet.create({
   },
   backBtn: {
     alignSelf: 'flex-start',
-    padding: SPACING.sm,
+    padding: 12,
     marginBottom: SPACING.lg,
     marginLeft: -SPACING.sm,
   },

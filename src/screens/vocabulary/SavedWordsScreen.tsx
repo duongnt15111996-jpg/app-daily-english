@@ -70,7 +70,7 @@ export default function SavedWordsScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => nav.goBack()}>
+        <TouchableOpacity onPress={() => nav.goBack()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Ionicons name="arrow-back" size={20} color={COLORS.text.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Saved Words</Text>

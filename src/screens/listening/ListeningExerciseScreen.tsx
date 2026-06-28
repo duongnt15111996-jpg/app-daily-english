@@ -12,7 +12,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { COLORS, FONTS, HEADER_TOP_EXTRA, RADIUS, SHADOW, SPACING } from '../../constants/theme';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { ApiListeningPart, fetchListeningParts } from '../../services/api';
-import { markLessonCompleted } from '../../store/progressStore';
+import { markLessonCompleted, markLessonInProgress } from '../../store/progressStore';
 import Button from '../../components/ui/Button';
 import ProgressBar from '../../components/ui/ProgressBar';
 
@@ -44,9 +44,11 @@ export default function ListeningExerciseScreen() {
   const [status, setStatus] = useState<Status>('idle');
   const [isPlaying, setIsPlaying] = useState(false);
   const [wordFeedback, setWordFeedback] = useState<{ word: string; correct: boolean }[]>([]);
+  const [completedPartIndices, setCompletedPartIndices] = useState<number[]>([]);
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const successAnim = useRef(new Animated.Value(0)).current;
   const soundRef = useRef<Audio.Sound | null>(null);
+  const audioGenRef = useRef(0);
 
   const currentPart = parts[partIndex];
 
@@ -57,6 +59,7 @@ export default function ListeningExerciseScreen() {
   useEffect(() => () => { soundRef.current?.unloadAsync(); }, []);
 
   useEffect(() => {
+    markLessonInProgress(params.topicId, params.sectionId, params.lessonId).catch(() => {});
     fetchListeningParts(params.topicId, params.sectionId, params.lessonId)
       .then(data => {
         setParts(data);
@@ -66,15 +69,18 @@ export default function ListeningExerciseScreen() {
   }, [params.topicId, params.sectionId, params.lessonId]);
 
   const playAudio = useCallback(async () => {
+    const gen = ++audioGenRef.current;
     try {
       if (soundRef.current) {
         await soundRef.current.unloadAsync();
         soundRef.current = null;
       }
+      if (gen !== audioGenRef.current) return;
+
       setIsPlaying(true);
 
       if (!currentPart?.audioUrl) {
-        setTimeout(() => setIsPlaying(false), 2000);
+        setTimeout(() => { if (gen === audioGenRef.current) setIsPlaying(false); }, 2000);
         return;
       }
 
@@ -82,12 +88,16 @@ export default function ListeningExerciseScreen() {
         { uri: currentPart.audioUrl },
         { shouldPlay: true }
       );
+      if (gen !== audioGenRef.current) {
+        sound.unloadAsync().catch(() => {});
+        return;
+      }
       soundRef.current = sound;
       sound.setOnPlaybackStatusUpdate(s => {
-        if (s.isLoaded && s.didJustFinish) setIsPlaying(false);
+        if (s.isLoaded && s.didJustFinish && gen === audioGenRef.current) setIsPlaying(false);
       });
     } catch {
-      setIsPlaying(false);
+      if (gen === audioGenRef.current) setIsPlaying(false);
     }
   }, [currentPart]);
 
@@ -134,12 +144,23 @@ export default function ListeningExerciseScreen() {
   };
 
   const handleNext = async () => {
+    setCompletedPartIndices(prev => prev.includes(partIndex) ? prev : [...prev, partIndex]);
     if (partIndex < parts.length - 1) {
       setPartIndex(p => p + 1);
     } else {
       await markLessonCompleted(params.lessonId);
       setStatus('completed');
     }
+  };
+
+  const handleNavigatePart = (index: number) => {
+    audioGenRef.current++;
+    if (soundRef.current) {
+      soundRef.current.unloadAsync().catch(() => {});
+      soundRef.current = null;
+    }
+    setIsPlaying(false);
+    setPartIndex(index);
   };
 
   if (loadState === 'loading') {
@@ -225,6 +246,39 @@ export default function ListeningExerciseScreen() {
         <ProgressBar progress={(partIndex + (status === 'correct' ? 1 : 0)) / parts.length} />
       </View>
 
+      {/* Part navigator */}
+      <View style={styles.partNav}>
+        <TouchableOpacity
+          style={[styles.partNavBtn, partIndex === 0 && styles.partNavBtnDisabled]}
+          onPress={() => handleNavigatePart(partIndex - 1)}
+          disabled={partIndex === 0}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="chevron-back" size={18} color={partIndex === 0 ? COLORS.text.light : COLORS.primary} />
+        </TouchableOpacity>
+
+        <View style={styles.partDots}>
+          {parts.map((_, i) => {
+            const isDone = completedPartIndices.includes(i);
+            const isCurrent = i === partIndex;
+            return (
+              <TouchableOpacity key={i} onPress={() => handleNavigatePart(i)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
+                <View style={[styles.partDot, isDone && styles.partDotDone, isCurrent && styles.partDotActive]} />
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <TouchableOpacity
+          style={[styles.partNavBtn, partIndex === parts.length - 1 && styles.partNavBtnDisabled]}
+          onPress={() => handleNavigatePart(partIndex + 1)}
+          disabled={partIndex === parts.length - 1}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="chevron-forward" size={18} color={partIndex === parts.length - 1 ? COLORS.text.light : COLORS.primary} />
+        </TouchableOpacity>
+      </View>
+
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {/* Audio Player */}
         <View style={[styles.playerCard, status === 'correct' && styles.playerCorrect, status === 'wrong' && styles.playerWrong]}>
@@ -265,19 +319,29 @@ export default function ListeningExerciseScreen() {
           </Animated.View>
 
           {/* Word-by-word feedback */}
-          {wordFeedback.length > 0 && status === 'wrong' && (
-            <View style={styles.feedbackRow}>
-              {wordFeedback.map((item, i) => (
-                <Text key={i} style={[styles.feedbackWord, item.correct ? styles.feedbackOk : styles.feedbackBad]}>
-                  {item.word}
-                </Text>
-              ))}
-            </View>
-          )}
+          {wordFeedback.length > 0 && status === 'wrong' && (() => {
+            const firstWrongIdx = wordFeedback.findIndex(w => !w.correct);
+            return (
+              <View style={styles.feedbackRow}>
+                {wordFeedback.map((item, i) => {
+                  if (firstWrongIdx !== -1 && i > firstWrongIdx) {
+                    return (
+                      <Text key={i} style={styles.feedbackHidden}>*</Text>
+                    );
+                  }
+                  return (
+                    <Text key={i} style={[styles.feedbackWord, item.correct ? styles.feedbackOk : styles.feedbackBad]}>
+                      {item.word}
+                    </Text>
+                  );
+                })}
+              </View>
+            );
+          })()}
 
           {/* Status message */}
           {status === 'wrong' && (
-            <View style={styles.statusMsg}>
+            <View style={[styles.statusMsg, { marginTop: 12 }]}>
               <Ionicons name="close-circle" size={16} color={COLORS.red} />
               <Text style={styles.statusTextWrong}>Not quite right. Listen again and try!</Text>
             </View>
@@ -313,11 +377,25 @@ export default function ListeningExerciseScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACING.lg, paddingTop: SPACING.md + HEADER_TOP_EXTRA, paddingBottom: SPACING.md, backgroundColor: COLORS.white, borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  backBtn: { padding: 4 },
+  backBtn: { padding: 12 },
   headerCenter: { flex: 1, alignItems: 'center' },
   topicName: { ...FONTS.medium, fontSize: 15, color: COLORS.text.primary },
   partLabel: { fontSize: 12, color: COLORS.text.secondary, marginTop: 2 },
-  progressWrap: { paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm, backgroundColor: COLORS.white },
+  progressWrap: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.sm, paddingBottom: 0, backgroundColor: COLORS.white },
+  partNav: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm,
+    backgroundColor: COLORS.white, borderBottomWidth: 1, borderBottomColor: COLORS.border,
+  },
+  partNavBtn: {
+    width: 32, height: 32, borderRadius: RADIUS.full,
+    backgroundColor: COLORS.primaryLight, alignItems: 'center', justifyContent: 'center',
+  },
+  partNavBtnDisabled: { backgroundColor: COLORS.border, opacity: 0.5 },
+  partDots: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1, flexWrap: 'wrap', justifyContent: 'center', paddingHorizontal: SPACING.sm },
+  partDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.border },
+  partDotActive: { width: 22, backgroundColor: COLORS.primary, borderRadius: 4 },
+  partDotDone: { backgroundColor: COLORS.green },
   content: { padding: SPACING.lg, gap: SPACING.lg },
   playerCard: {
     backgroundColor: COLORS.white, borderRadius: RADIUS.xxl, padding: SPACING.xl,
@@ -347,6 +425,7 @@ const styles = StyleSheet.create({
   feedbackWord: { fontSize: 15, paddingHorizontal: 6, paddingVertical: 2, borderRadius: RADIUS.sm },
   feedbackOk: { backgroundColor: COLORS.green + '25', color: COLORS.green },
   feedbackBad: { backgroundColor: COLORS.red + '20', color: COLORS.red, textDecorationLine: 'line-through' },
+  feedbackHidden: { fontSize: 15, paddingHorizontal: 6, paddingVertical: 2, color: COLORS.text.light },
   statusMsg: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusTextWrong: { fontSize: 13, color: COLORS.red },
   statusTextOk: { fontSize: 13, color: COLORS.green, ...FONTS.medium },
